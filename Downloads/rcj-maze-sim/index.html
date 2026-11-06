@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>RCJ Maze Terrain Simulator</title>
+<meta name="description" content="Quasi-static simulator for ramps, stairs and speed bumps in RoboCupJunior Rescue Maze 2027.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div>
+    <h1>RCJ Maze Terrain Simulator</h1>
+    <p class="sub">Ramps, stairs and speed bumps sized to the 2027 rules (draft). Quasi-static 2D model with real wheel contact geometry, per-axle traction and motor torque.</p>
+  </div>
+  <div class="rulebadge"><a class="rl" data-rulepdf="1" target="_blank" rel="noopener" href="#">RoboCupJunior Rescue Maze · 2027 Rules (draft, 2026-10-30)</a><br>28 × 28 cm tiles · ±10 % tolerance</div>
+</header>
+
+<div class="grid">
+<aside id="panel">
+  <fieldset>
+    <legend>Scenario</legend>
+    <div class="seg" id="seg-scen" role="group" aria-label="Scenario">
+      <button data-v="rampa" aria-pressed="true">Ramp</button><button data-v="escada" aria-pressed="false">Stairs</button><button data-v="lombada" aria-pressed="false">Speed bump</button>
+    </div>
+    <div class="seg" id="seg-dir" role="group" aria-label="Direction">
+      <button data-v="up" aria-pressed="true">Uphill</button><button data-v="down" aria-pressed="false">Downhill</button>
+    </div>
+    <label class="chk-in"><input type="checkbox" id="dz"> <span data-rules>Hazard Zone (4.2): ramps and stairs up to 30°; speed bumps up to 2 cm, allowed on ramps</span></label>
+    <label class="chk-in"><input type="checkbox" id="tol" checked> <span data-rules>Test the worst case with the +10 % measurement tolerance (4.1.1)</span></label>
+  </fieldset>
+  <fieldset id="g-rampa">
+    <legend>Ramp</legend>
+    <div class="row"><label for="rmode">Define by</label><select id="rmode"><option value="ang">Angle and number of tiles</option><option value="hl">Height and horizontal length</option></select></div>
+    <div class="ctl" data-k="th"></div><div class="ctl" data-k="tiles"></div>
+    <div class="ctl" data-k="Hh"></div><div class="ctl" data-k="Lh"></div>
+    <p class="hint" id="ramp-derived"></p>
+  </fieldset>
+  <fieldset id="g-bump">
+    <legend id="lg-bump">Speed bumps on the ramp</legend>
+    <div id="bumps" class="bumps"></div>
+    <button class="btn" id="addBump" type="button">Add speed bump</button>
+    <p class="hint" id="bump-hint"></p>
+  </fieldset>
+  <fieldset id="g-escada">
+    <legend>Stairs</legend>
+    <div class="ctl" data-k="sth"></div><div class="ctl" data-k="sh"></div><div class="ctl" data-k="ns"></div><div class="ctl" data-k="land"></div>
+    <p class="hint" id="stair-derived"></p>
+  </fieldset>
+  <fieldset>
+    <legend>Robot</legend>
+    <div class="ctl" data-k="m"></div><div class="ctl" data-k="L"></div><div class="ctl" data-k="hcg"></div><div class="ctl" data-k="cgf"></div><div class="ctl" data-k="c"></div><div class="ctl" data-k="o"></div>
+  </fieldset>
+  <fieldset>
+    <legend>Wheels and floor</legend>
+    <div class="row"><label for="mat">Wheel material</label><select id="mat"></select></div>
+    <div class="row"><label for="floor">Floor</label><select id="floor"></select></div>
+    <div class="ctl" data-k="D"></div>
+    <label class="chk-in"><input type="checkbox" id="muOn"> Use measured μ instead of the table value</label>
+    <div class="ctl" data-k="muv"></div>
+    <div class="calib"><span>Tilt test: slid at</span><input id="slipA" type="number" min="1" max="60" step="0.5" value="40" aria-label="Slip angle in degrees"><span>° → μ =</span><b id="slipMu" style="font-family:var(--f-mono)">0.84</b><button class="btn" id="useSlip" type="button">Use</button></div>
+  </fieldset>
+  <fieldset>
+    <legend>Drive and motors</legend>
+    <div class="row"><label for="drive">Drive</label><select id="drive"><option value="4wd">4WD (front and rear axles driven)</option><option value="rwd">Rear-wheel drive (front free)</option><option value="fwd">Front-wheel drive (rear free)</option></select></div>
+    <div class="row"><label for="mot">Motor</label><select id="mot"></select></div>
+    <div class="ctl" data-k="nm"></div><div class="ctl" data-k="ts"></div><div class="ctl" data-k="rpm"></div><div class="ctl" data-k="eta"></div><div class="ctl" data-k="kop"></div>
+    <p class="hint">Motor values are typical catalog figures; check the datasheet at the voltage you run. The usable fraction caps torque at a sustainable level below stall.</p>
+  </fieldset>
+</aside>
+
+<main>
+  <section class="card">
+    <div class="scene-head">
+      <div><h2 id="scene-title">Ramp</h2></div>
+      <div class="ctrls"><span class="verdict" id="verdict">—</span><button class="btn" id="play" type="button">Pause</button><button class="btn" id="restart" type="button">Restart</button></div>
+    </div>
+    <div class="svgbox"><svg id="scene" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Side view of the robot crossing the terrain"></svg></div>
+    <p class="scene-note" id="scene-note"></p>
+  </section>
+
+  <div class="two">
+    <section class="card">
+      <h2>Current case diagnosis</h2>
+      <p class="lead">Margin = available ÷ required. Below 1.0 the robot fails; between 1.0 and 1.2 it passes with no slack.</p>
+      <div class="checks" id="checks"></div>
+      <div class="sect-label">2027 rules compliance</div>
+      <div class="checks" id="rulechecks"></div>
+    </section>
+    <section class="card">
+      <h2>Robot figures</h2>
+      <p class="lead">Quantities that do not depend on the scenario or that help size wheels and motors.</p>
+      <div class="kv" id="kv"></div>
+    </section>
+  </div>
+
+  <section class="card">
+    <h2>2027 rules test battery</h2>
+    <p class="lead">The same robot runs every terrain element at the rule limits. With tolerance on, each limit is tested at +10 %.</p>
+    <div class="tbl"><table id="battery"></table></div>
+  </section>
+
+  <section class="card">
+    <h2>Wheel material × diameter</h2>
+    <p class="lead" id="matrix-lead">Current scenario, same robot and motors. Each cell shows the margin of the worst physical check. The outlined cell is the selected configuration.</p>
+    <div class="tbl"><table id="matrix"></table></div>
+  </section>
+
+  <section class="card">
+    <h2>Feasibility map μ × diameter</h2>
+    <p class="lead">Continuous sweep of the current scenario. Click the map to apply that diameter and μ to the robot.</p>
+    <div class="heatwrap"><canvas id="heat" width="760" height="380" aria-label="Feasibility map by friction coefficient and wheel diameter"></canvas></div>
+    <div class="legend" id="heat-legend"></div>
+  </section>
+
+  <section class="card">
+    <h2>Model</h2>
+    <p class="lead">Two-axle robot in the vertical plane, rigid wheels, quasi-static regime (accelerations neglected). At each obstacle the critical instant is analyzed: the front wheel touches the edge while still resting on the lower surface. Geometry (chassis scraping, bumper, resting on stair nosings) is checked along the whole path.</p>
+    <div class="eqs" id="eqs"></div>
+  </section>
+
+  <section class="card">
+    <h2>Rules used</h2>
+    <p class="lead">Each section number opens the <a class="rl" data-rulepdf="1" target="_blank" rel="noopener" href="#">RoboCupJunior Rescue Maze 2027 rules (draft)</a> at its page.</p>
+    <ul class="rules">
+      <li><code>4.1.1</code> All field measurements have a ±10 % tolerance.</li>
+      <li><code>4.1.2</code> Tiles are 28 × 28 cm; walls at least 12.5 cm high (<code>4.1.3</code>).</li>
+      <li><code>4.1.5</code> Up to 3 mm height deviation and 3 mm gaps between tiles.</li>
+      <li><code>4.2</code> Hazard Zone: enclosed, red tile at each entrance; the Hazard Variant rules apply inside.</li>
+      <li><code>4.4.1</code> Speed bumps fixed to the floor, up to 1 cm, never on ramps or stairs. Hazard Variant: up to 2 cm and allowed on ramps.</li>
+      <li><code>4.4.3</code> Debris only in the Hazard Zone, loose, up to 1 cm (not simulated here).</li>
+      <li><code>4.4.4</code> Ramps up to 25°, no peak-like structure, always ending on a horizontal tile. Hazard Variant: up to 30°.</li>
+      <li><code>4.4.5</code> Stairs as wide as the tiles, steps up to 2 cm, incline up to 25° between steps, ending on a horizontal tile. Peak-like stairs: top step 15 cm to less than one tile. Hazard Variant: up to 30°.</li>
+      <li><code>6.7</code> Scored ramp or stair: 10 pts, when the robot reaches a horizontal tile other than the one it started from. Speed bump tile: 5 pts.</li>
+      <li><code>6.8.2</code> Exit bonus adds 5 pts per scored ramp and per scored stair.</li>
+    </ul>
+  </section>
+</main>
+</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+<script src="js/physics.js"></script>
+<script src="js/ui.js"></script>
+</body>
+</html>
